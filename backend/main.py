@@ -49,6 +49,54 @@ app.add_middleware(
 )
 
 
+def get_money_loop_users() -> set[str]:
+    """Return the set of users involved in detected circular transfers."""
+    loop_users = set()
+    for loop in tg_client.detect_money_loops():
+        loop_users.update(
+            user_id
+            for user_id in (loop.get("user_a"), loop.get("user_b"), loop.get("user_c"))
+            if user_id
+        )
+    return loop_users
+
+
+def build_risk_result(
+    user_id: str,
+    signals_raw: dict,
+    money_loop_users: set[str],
+    connections: dict | None = None,
+) -> RiskResult:
+    """Convert raw TigerGraph signals into a scored API response."""
+    signals = RiskSignals(
+        shared_device_count=signals_raw.get("shared_device_count", 0),
+        shared_phone_count=signals_raw.get("shared_phone_count", 0),
+        sent_to_count=signals_raw.get("sent_to_count", 0),
+        received_from_count=signals_raw.get("received_from_count", 0),
+        total_sent=signals_raw.get("total_sent", 0.0),
+        total_received=signals_raw.get("total_received", 0.0),
+        connected_flagged_users=signals_raw.get("connected_flagged_users", []),
+        is_in_money_loop=user_id in money_loop_users,
+        is_flagged=signals_raw.get("is_flagged", False),
+    )
+
+    score, level, explanations = calculate_risk_score(signals)
+    connections = connections or {}
+
+    return RiskResult(
+        user_id=user_id,
+        user_name=signals_raw.get("user_name", "Unknown"),
+        risk_score=score,
+        risk_level=level,
+        signals=signals,
+        explanation=explanations,
+        connected_users=connections.get("connected_users", []),
+        connected_phones=connections.get("connected_phones", []),
+        connected_devices=connections.get("connected_devices", []),
+        connected_accounts=connections.get("connected_accounts", []),
+    )
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
@@ -73,6 +121,7 @@ async def check_number(request: CheckNumberRequest):
 
     # Find all connections from this phone number
     connections = tg_client.find_connections(request.phone_number)
+    money_loop_users = get_money_loop_users()
 
     if not connections["connected_users"]:
         return {
@@ -86,41 +135,14 @@ async def check_number(request: CheckNumberRequest):
     results = []
     for user_id in connections["connected_users"]:
         signals_raw = tg_client.check_user_risk(user_id)
-
-        # Check if user is in money loop
-        loops = tg_client.detect_money_loops()
-        in_loop = False
-        for loop in loops:
-            if user_id in [loop.get("user_a"), loop.get("user_b"), loop.get("user_c")]:
-                in_loop = True
-                break
-
-        signals = RiskSignals(
-            shared_device_count=signals_raw.get("shared_device_count", 0),
-            shared_phone_count=signals_raw.get("shared_phone_count", 0),
-            sent_to_count=signals_raw.get("sent_to_count", 0),
-            received_from_count=signals_raw.get("received_from_count", 0),
-            total_sent=signals_raw.get("total_sent", 0.0),
-            total_received=signals_raw.get("total_received", 0.0),
-            connected_flagged_users=signals_raw.get("connected_flagged_users", []),
-            is_in_money_loop=in_loop,
-            is_flagged=signals_raw.get("is_flagged", False),
+        results.append(
+            build_risk_result(
+                user_id=user_id,
+                signals_raw=signals_raw,
+                money_loop_users=money_loop_users,
+                connections=connections,
+            )
         )
-
-        score, level, explanations = calculate_risk_score(signals)
-
-        results.append(RiskResult(
-            user_id=user_id,
-            user_name=signals_raw.get("user_name", "Unknown"),
-            risk_score=score,
-            risk_level=level,
-            signals=signals,
-            explanation=explanations,
-            connected_users=connections["connected_users"],
-            connected_phones=connections["connected_phones"],
-            connected_devices=connections["connected_devices"],
-            connected_accounts=connections["connected_accounts"],
-        ))
 
     # Sort by risk score descending
     results.sort(key=lambda r: r.risk_score, reverse=True)
@@ -145,34 +167,10 @@ async def check_user(request: CheckUserRequest):
     if not signals_raw.get("user_name"):
         raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
 
-    # Check money loops
-    loops = tg_client.detect_money_loops()
-    in_loop = any(
-        request.user_id in [l.get("user_a"), l.get("user_b"), l.get("user_c")]
-        for l in loops
-    )
-
-    signals = RiskSignals(
-        shared_device_count=signals_raw.get("shared_device_count", 0),
-        shared_phone_count=signals_raw.get("shared_phone_count", 0),
-        sent_to_count=signals_raw.get("sent_to_count", 0),
-        received_from_count=signals_raw.get("received_from_count", 0),
-        total_sent=signals_raw.get("total_sent", 0.0),
-        total_received=signals_raw.get("total_received", 0.0),
-        connected_flagged_users=signals_raw.get("connected_flagged_users", []),
-        is_in_money_loop=in_loop,
-        is_flagged=signals_raw.get("is_flagged", False),
-    )
-
-    score, level, explanations = calculate_risk_score(signals)
-
-    result = RiskResult(
+    result = build_risk_result(
         user_id=request.user_id,
-        user_name=signals_raw.get("user_name", "Unknown"),
-        risk_score=score,
-        risk_level=level,
-        signals=signals,
-        explanation=explanations,
+        signals_raw=signals_raw,
+        money_loop_users=get_money_loop_users(),
     )
 
     return result.model_dump()
@@ -249,7 +247,7 @@ async def get_stats():
         "phones": tg_client.get_vertex_count("Phone"),
         "devices": tg_client.get_vertex_count("Device"),
         "accounts": tg_client.get_vertex_count("BankAccount"),
-        "transactions": tg_client.get_vertex_count("Transaction"),
+        "transactions": tg_client.get_transaction_count(),
     }
 
 

@@ -156,6 +156,28 @@ class TigerGraphClient:
         except Exception:
             return 0
 
+    def get_edge_count(self, edge_type: str) -> int:
+        """Get count of edges of a specific type."""
+        try:
+            counts = self.conn.getEdgeCount(edge_type)
+            if isinstance(counts, dict):
+                return int(counts.get(edge_type, 0))
+            return int(counts or 0)
+        except Exception:
+            return 0
+
+    def get_transaction_count(self) -> int:
+        """
+        Get total transaction count.
+
+        Some local setups model transactions as `SENT_TO` edges instead of
+        dedicated `Transaction` vertices, so we fall back to edge counts.
+        """
+        transaction_vertices = self.get_vertex_count("Transaction")
+        if transaction_vertices > 0:
+            return transaction_vertices
+        return self.get_edge_count("SENT_TO")
+
     def get_all_users(self) -> list:
         """Get all user vertices."""
         try:

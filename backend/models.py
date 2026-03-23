@@ -1,6 +1,5 @@
 """Pydantic models for GraphGuard AI API."""
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
 
 
 class CheckNumberRequest(BaseModel):
@@ -18,7 +17,7 @@ class RiskSignals(BaseModel):
     received_from_count: int = 0
     total_sent: float = 0.0
     total_received: float = 0.0
-    connected_flagged_users: list[str] = []
+    connected_flagged_users: list[str] = Field(default_factory=list)
     is_in_money_loop: bool = False
     is_flagged: bool = False
 
@@ -30,10 +29,10 @@ class RiskResult(BaseModel):
     risk_level: str  # LOW, MEDIUM, HIGH, CRITICAL
     signals: RiskSignals
     explanation: list[str]
-    connected_users: list[str] = []
-    connected_phones: list[str] = []
-    connected_devices: list[str] = []
-    connected_accounts: list[str] = []
+    connected_users: list[str] = Field(default_factory=list)
+    connected_phones: list[str] = Field(default_factory=list)
+    connected_devices: list[str] = Field(default_factory=list)
+    connected_accounts: list[str] = Field(default_factory=list)
 
 
 class GraphNode(BaseModel):

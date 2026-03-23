@@ -6,6 +6,7 @@ export default function StatsCards({ stats, clusters }) {
     { key: 'phones', icon: '📱', value: stats?.phones || 0, label: 'Phones', className: 'phones' },
     { key: 'devices', icon: '💻', value: stats?.devices || 0, label: 'Devices', className: 'devices' },
     { key: 'accounts', icon: '🏦', value: stats?.accounts || 0, label: 'Accounts', className: 'accounts' },
+    { key: 'transactions', icon: '💸', value: stats?.transactions || 0, label: 'Transactions', className: 'transactions' },
     { key: 'alerts', icon: '🚨', value: alertCount, label: 'Alerts', className: 'alerts' },
   ];
 

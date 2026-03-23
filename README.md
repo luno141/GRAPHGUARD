@@ -2,89 +2,137 @@
   <img src="https://raw.githubusercontent.com/tigergraph/ecosystem/master/tigergraph_logo.png" alt="TigerGraph" width="150" />
 </p>
 
-# GraphGuard AI - TigerGraph Fraud Detection 🐯
-> Stop sophisticated fraud rings with Deep Link Analysis and Sub-second Graph Queries on TigerGraph.
+# GraphGuard AI
+Stop organized fraud rings with TigerGraph-powered link analysis, pattern detection, and explainable risk scoring.
 
-![Dashboard Preview](docs/dashboard.png) *(Add a screenshot here)*
+## Quickstart for Judges
+This project is easiest to evaluate in four steps:
 
-## 💡 The Problem Statement
-Modern financial fraud is no longer perpetrated by isolated actors. Today's threats come from **organized fraud rings** using complex networks of synthetic identities, burner phones, shared devices, and circular money transfers. 
-
-Traditional relational databases and tabular rule engines identify fraud by looking at single rows. They **fail to detect the hidden connections** between entities. Analyzing "Who sent money to whom, who shares the same device as a flagged user, and who are they 3-hops connected to?" requires expensive multi-table joins that bring SQL databases to a crawl.
-
-## 🔗 The Graph Use-Case (Why TigerGraph?)
-GraphGuard AI solves this by adopting **TigerGraph** as its core intelligence engine. By modeling users, devices, bank accounts, and transactions as a Native Graph, we can achieve:
-
-1. **Sub-second Deep Link Analysis:** Finding a 3-hop connection (User ➔ Phone ➔ User ➔ Device) executes in milliseconds in TigerGraph via GSQL.
-2. **Pattern Matching:** Native graph queries easily detect shared device hubs, circular money trails, and phone number reuse.
-3. **Graph-powered Risk Scoring:** We calculate real-time risks for any identity by measuring graph distance to known fraudulent actors.
-
-### Graph Schema
-- **Vertices:** `User`, `Phone`, `BankAccount`, `Device`
-- **Edges (Directed):** 
-  - `HAS_PHONE` (User ➔ Phone)
-  - `OWNS_ACCOUNT` (User ➔ BankAccount)
-  - `USES_DEVICE` (User ➔ Device)
-  - `SENT_TO` (User ➔ User, holds `amount`)
-
-## 🛠️ Implementation & Architecture
-- **Database:** TigerGraph Database (Community Edition). Stores all relational entities and uses custom GSQL queries for network analytics.
-- **Backend API:** FastAPI (Python), utilizing `pyTigerGraph` to execute queries over TigerGraph's REST++ API.
-- **Frontend Dashboard:** React + Vite, featuring `react-cytoscapejs` for interactive node-edge visualization.
-
-## 🚀 Impact
-By switching to a graph-native architecture, investigations that used to take fraud analysts hours of manual cross-referencing now happen **instantly, autonomously, and visually.** Financial institutions can block funds in real-time before money leaves the network.
-
----
-
-## 💻 Setup Instructions
-
-### Prerequisites
-1. Docker (to run TigerGraph locally containerized)
-2. Python 3.10+
-3. Node.js 18+
-
-### Step 1: Start TigerGraph
-Run TigerGraph locally via Docker:
+1. Start TigerGraph locally:
 ```bash
 docker run -d -p 9000:9000 -p 14240:14240 -p 14141:14141 --name tigergraph --ulimit nofile=1000000:1000000 tigergraph/tigergraph:latest
 ```
-*Wait a couple of minutes for TigerGraph to fully boot.*
 
-### Step 2: Install Schema & GSQL Queries
-We provide an automated pyTigerGraph script that builds the schema, installs the GSQL REST endpoints, and loads mock fraud data.
+2. Install the schema and GSQL queries:
 ```bash
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-
-# Run the TigerGraph Override Script
 python3 setup_tigergraph_v2.py
 ```
-*(Note: Expect schema generation & query installation to take ~2 minutes. This runs `INSTALL QUERY ALL` natively inside TigerGraph).*
 
-### Step 3: Run Backend API
+3. Run the backend:
 ```bash
 cd backend
+source venv/bin/activate
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Step 4: Run Frontend Viewer
+4. Run the frontend:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Navigate to `http://localhost:5173`.
 
----
+Open `http://localhost:5173`.
 
-## 🔍 How TigerGraph is Used (GSQL Queries)
-Within `queries_only.gsql`, you will find advanced TigerGraph V2 Syntax implementations:
-- `find_connections(phone_num)`: Traverses reverse edges to find all users mapped to a phone, then recursively maps their accounts and devices out multiple hops.
-- `detect_money_loops()`: Finds circular transfer rings (User A ➔ B ➔ C ➔ A) using multi-hop graph pattern matching.
-- `detect_shared_devices()`: Accums and Groups users who share the identical `dev_id` MAC addresses.
+Expected startup times:
+- TigerGraph boot: about 2 to 3 minutes
+- Schema + query install: about 2 minutes
+- UI refresh after clicking `Load Sample Data`: usually under 10 seconds
 
-## 📝 License
+Tip for judges:
+- Once the UI is open, click `Load Sample Data` to populate the full fraud-ring demo scenario used by the dashboard.
+
+## What TigerGraph Is Doing That a Normal DB Does Not
+- Multi-hop fraud ring detection: 3-hop and 4-hop relationships are traversed directly in TigerGraph instead of being rebuilt with deep SQL join trees.
+- In-database pattern detection: `detect_money_loops`, `detect_shared_devices`, and `detect_phone_reuse` run as native GSQL queries inside TigerGraph.
+- Real-time graph signals for scoring: risk is driven by connected entities, graph exposure, and suspicious transfer structure, not row-by-row rules alone.
+
+## Demo Flow
+Use this sequence for a clean 3-minute walkthrough:
+
+1. Click `Load Sample Data` in the UI so the graph is populated live.
+2. Point to the top stats cards showing users, phones, devices, accounts, transactions, and alerts.
+3. Search for `+1-555-0101` and show the highest-risk linked user.
+4. Walk through the risk meter and grouped explanation panel to explain why the alert fired.
+5. Switch attention to the graph view and show the highlighted neighborhood around that suspicious identity.
+6. Close with the TigerGraph pattern-query cards and the detected fraud pattern list.
+
+## Why This Is a Graph Problem
+Modern payment fraud is rarely isolated. It is coordinated across:
+- shared phones
+- shared devices
+- mule accounts
+- circular money transfers
+- lightly connected "clean" accounts that hide the ring
+
+Traditional relational systems struggle to answer questions like:
+- Which users are 3 hops away from a flagged identity?
+- Which devices are reused across multiple suspicious accounts?
+- Which transfers form circular loops?
+
+GraphGuard AI models those relationships natively so analysts can move from one suspicious identity to the surrounding fraud ring in seconds.
+
+## Architecture
+- Database: TigerGraph Community Edition running locally in Docker
+- Backend API: FastAPI plus `pyTigerGraph`
+- Frontend: React + Vite + Cytoscape
+- Core entities: `User`, `Phone`, `Device`, `BankAccount`
+- Core relationship: `SENT_TO` captures money movement between users
+
+## Graph Schema
+- Vertices: `User`, `Phone`, `BankAccount`, `Device`
+- Edges:
+  - `HAS_PHONE`
+  - `USES_DEVICE`
+  - `OWNS_ACCOUNT`
+  - `SENT_TO`
+
+## Main GSQL Queries
+- `check_user_risk`
+  - Computes graph-derived risk features around a user, including shared devices, shared phones, outgoing transfer fan-out, and flagged neighbors.
+- `find_connections`
+  - Traverses from a suspicious phone into the linked users, then out to related devices and bank accounts.
+- `detect_money_loops`
+  - Finds circular transfer patterns such as User A -> User B -> User C -> User A.
+- `detect_shared_devices`
+  - Flags device hubs reused by more than one user.
+- `detect_phone_reuse`
+  - Flags phone numbers linked to multiple accounts.
+- `get_graph_data`
+  - Returns the graph payload rendered by the Cytoscape dashboard.
+
+## TigerGraph vs. SQL Slide Idea
+For the finale deck, show one fraud question in two forms:
+
+- SQL version: a large join-heavy query across users, phones, devices, and transfers
+- TigerGraph version: one graph traversal or pattern query
+
+That makes the value of the graph database obvious in under 10 seconds.
+
+## Who Would Use This Tomorrow
+- Bank fraud analysts investigating suspicious money movement
+- Fintech risk teams screening linked identities in real time
+- Payment gateway compliance teams reviewing mule-account behavior
+
+## If We Had 3 More Days
+- Stream TigerGraph features into a real-time event pipeline
+- Add a lightweight supervised model on top of graph features
+- Build case management for analyst review, resolution, and false-positive tracking
+
+## Project Files Worth Opening
+- `backend/tigergraph_client.py`
+- `backend/main.py`
+- `backend/risk_scorer.py`
+- `queries_only.gsql`
+- `frontend/src/App.jsx`
+- `frontend/src/components/GraphView.jsx`
+
+## Demo Video
+If you are submitting this project to judges, add a short 60 to 90 second demo video link here before the final submission. The current repo is optimized for local evaluation and live demo flow.
+
+## License
 MIT

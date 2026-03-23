@@ -36,8 +36,6 @@ export default function GraphView({ graphData, highlightNodes }) {
 
         const isFlagged = node.flagged;
         const isHighlighted = highlightNodes?.includes(node.id);
-        const colorKey = isFlagged ? 'User-flagged' : node.node_type;
-
         elements.push({
           data: {
             id: node.id,

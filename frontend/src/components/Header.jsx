@@ -1,5 +1,3 @@
-import { useState, useEffect } from 'react';
-
 export default function Header({ health }) {
   const connected = health?.tigergraph_connected || false;
 
