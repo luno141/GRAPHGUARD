@@ -1,0 +1,13 @@
+DROP ALL
+
+CREATE VERTEX User (PRIMARY_ID uid STRING, name STRING, email STRING, created_at STRING, is_flagged BOOL) WITH primary_id_as_attribute="true"
+CREATE VERTEX Phone (PRIMARY_ID number STRING, carrier STRING) WITH primary_id_as_attribute="true"
+CREATE VERTEX BankAccount (PRIMARY_ID account_number STRING, bank_name STRING, balance DOUBLE DEFAULT 0) WITH primary_id_as_attribute="true"
+CREATE VERTEX Device (PRIMARY_ID device_id STRING, device_type STRING, os STRING) WITH primary_id_as_attribute="true"
+
+CREATE DIRECTED EDGE HAS_PHONE (FROM User, TO Phone, since STRING) WITH REVERSE_EDGE="reverse_HAS_PHONE"
+CREATE DIRECTED EDGE OWNS_ACCOUNT (FROM User, TO BankAccount, since STRING) WITH REVERSE_EDGE="reverse_OWNS_ACCOUNT"
+CREATE DIRECTED EDGE USES_DEVICE (FROM User, TO Device, last_used STRING) WITH REVERSE_EDGE="reverse_USES_DEVICE"
+CREATE DIRECTED EDGE SENT_TO (FROM User, TO User, amount DOUBLE, tx_id STRING, timestamp_val STRING) WITH REVERSE_EDGE="reverse_SENT_TO"
+
+CREATE GRAPH FraudGraph (User, Phone, BankAccount, Device, HAS_PHONE, OWNS_ACCOUNT, USES_DEVICE, SENT_TO)

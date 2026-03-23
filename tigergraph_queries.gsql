@@ -1,0 +1,195 @@
+// ============================================
+// GraphGuard AI — GSQL Fraud Detection Queries
+// ============================================
+USE GRAPH FraudGraph
+
+// --- Query 1: Find all connections from a phone number (2-3 hop traversal) ---
+CREATE OR REPLACE QUERY find_connections(STRING phone_num) FOR GRAPH FraudGraph
+SYNTAX V2 {
+
+  SetAccum<STRING> @@connected_users;
+  SetAccum<STRING> @@connected_phones;
+  SetAccum<STRING> @@connected_devices;
+  SetAccum<STRING> @@connected_accounts;
+
+  start = {Phone.*};
+  phones = SELECT p FROM start:p WHERE p.number == phone_num;
+
+  // Hop 1: Phone -> Users
+  users1 = SELECT u FROM phones:p -(reverse_HAS_PHONE)- User:u
+           ACCUM @@connected_users += u.uid;
+
+  // Hop 2: Users -> their other phones, devices, accounts
+  phones2 = SELECT ph FROM users1:u -(HAS_PHONE)- Phone:ph
+            ACCUM @@connected_phones += ph.number;
+
+  devices2 = SELECT d FROM users1:u -(USES_DEVICE)- Device:d
+             ACCUM @@connected_devices += d.device_id;
+
+  accounts2 = SELECT a FROM users1:u -(OWNS_ACCOUNT)- BankAccount:a
+              ACCUM @@connected_accounts += a.account_number;
+
+  // Hop 3: Shared devices -> other users
+  users3 = SELECT u FROM devices2:d -(reverse_USES_DEVICE)- User:u
+           ACCUM @@connected_users += u.uid;
+
+  PRINT @@connected_users AS connected_users;
+  PRINT @@connected_phones AS connected_phones;
+  PRINT @@connected_devices AS connected_devices;
+  PRINT @@connected_accounts AS connected_accounts;
+}
+
+// --- Query 2: Detect users sharing the same device ---
+CREATE OR REPLACE QUERY detect_shared_devices() FOR GRAPH FraudGraph
+SYNTAX V2 {
+
+  TYPEDEF TUPLE<STRING device_id, STRING device_type, INT user_count> SharedDeviceInfo;
+  SetAccum<STRING> @@device_users;
+  ListAccum<SharedDeviceInfo> @@shared_devices;
+
+  start = {Device.*};
+
+  result = SELECT d FROM start:d -(reverse_USES_DEVICE)- User:u
+           ACCUM d.@user_list += u.uid
+           POST-ACCUM
+             CASE WHEN d.@user_list.size() > 1 THEN
+               @@shared_devices += SharedDeviceInfo(d.device_id, d.device_type, d.@user_list.size())
+             END;
+
+  PRINT @@shared_devices AS shared_devices;
+}
+
+// --- Query 3: Detect money loops (circular transfers) ---
+CREATE OR REPLACE QUERY detect_money_loops() FOR GRAPH FraudGraph
+SYNTAX V2 {
+
+  TYPEDEF TUPLE<STRING user_a, STRING user_b, STRING user_c, DOUBLE total_amount> MoneyLoop;
+  ListAccum<MoneyLoop> @@loops;
+
+  start = {User.*};
+
+  // Find A -> B -> C -> A patterns
+  result = SELECT a FROM start:a -(SENT_TO)- User:b -(SENT_TO)- User:c -(SENT_TO)- User:a2
+           WHERE a == a2 AND a != b AND b != c AND a != c
+           ACCUM @@loops += MoneyLoop(a.uid, b.uid, c.uid, 0);
+
+  PRINT @@loops AS money_loops;
+}
+
+// --- Query 4: Detect phone numbers linked to multiple users ---
+CREATE OR REPLACE QUERY detect_phone_reuse() FOR GRAPH FraudGraph
+SYNTAX V2 {
+
+  TYPEDEF TUPLE<STRING phone_number, STRING carrier, INT user_count> PhoneReuse;
+  ListAccum<PhoneReuse> @@reused_phones;
+
+  start = {Phone.*};
+
+  result = SELECT p FROM start:p -(reverse_HAS_PHONE)- User:u
+           ACCUM p.@user_list += u.uid
+           POST-ACCUM
+             CASE WHEN p.@user_list.size() > 1 THEN
+               @@reused_phones += PhoneReuse(p.number, p.carrier, p.@user_list.size())
+             END;
+
+  PRINT @@reused_phones AS reused_phones;
+}
+
+// --- Query 5: Get full graph data for visualization ---
+CREATE OR REPLACE QUERY get_graph_data() FOR GRAPH FraudGraph
+SYNTAX V2 {
+
+  TYPEDEF TUPLE<STRING id, STRING node_type, STRING label, BOOL flagged> NodeInfo;
+  TYPEDEF TUPLE<STRING source, STRING target, STRING edge_type, STRING label> EdgeInfo;
+  ListAccum<NodeInfo> @@nodes;
+  ListAccum<EdgeInfo> @@edges;
+
+  // Get all users
+  users = {User.*};
+  r1 = SELECT u FROM users:u
+       ACCUM @@nodes += NodeInfo(u.uid, "User", u.name, u.is_flagged);
+
+  // Get all phones with edges
+  r2 = SELECT p FROM users:u -(HAS_PHONE)- Phone:p
+       ACCUM
+         @@nodes += NodeInfo(p.number, "Phone", p.number, false),
+         @@edges += EdgeInfo(u.uid, p.number, "HAS_PHONE", "has_phone");
+
+  // Get all devices with edges
+  r3 = SELECT d FROM users:u -(USES_DEVICE)- Device:d
+       ACCUM
+         @@nodes += NodeInfo(d.device_id, "Device", d.device_type + " (" + d.os + ")", false),
+         @@edges += EdgeInfo(u.uid, d.device_id, "USES_DEVICE", "uses_device");
+
+  // Get all accounts with edges
+  r4 = SELECT a FROM users:u -(OWNS_ACCOUNT)- BankAccount:a
+       ACCUM
+         @@nodes += NodeInfo(a.account_number, "BankAccount", a.bank_name, false),
+         @@edges += EdgeInfo(u.uid, a.account_number, "OWNS_ACCOUNT", "owns_account");
+
+  // Get all SENT_TO edges
+  r5 = SELECT t FROM users:u -(SENT_TO:e)- User:t
+       ACCUM @@edges += EdgeInfo(u.uid, t.uid, "SENT_TO", "$" + to_string(e.amount));
+
+  PRINT @@nodes AS nodes;
+  PRINT @@edges AS edges;
+}
+
+// --- Query 6: Check a specific user's fraud signals ---
+CREATE OR REPLACE QUERY check_user_risk(STRING user_id) FOR GRAPH FraudGraph
+SYNTAX V2 {
+
+  SumAccum<INT> @@shared_device_count;
+  SumAccum<INT> @@shared_phone_count;
+  SumAccum<INT> @@sent_to_count;
+  SumAccum<INT> @@received_from_count;
+  SumAccum<DOUBLE> @@total_sent;
+  SumAccum<DOUBLE> @@total_received;
+  SetAccum<STRING> @@connected_flagged_users;
+  BOOL @@is_flagged = false;
+  STRING @@user_name = "";
+
+  start = {User.*};
+  user_node = SELECT u FROM start:u WHERE u.uid == user_id
+              POST-ACCUM @@is_flagged = u.is_flagged, @@user_name = u.name;
+
+  // Check shared devices
+  user_devices = SELECT d FROM user_node:u -(USES_DEVICE)- Device:d;
+  shared_users = SELECT u2 FROM user_devices:d -(reverse_USES_DEVICE)- User:u2
+                 WHERE u2.uid != user_id
+                 ACCUM @@shared_device_count += 1;
+
+  // Check shared phones
+  user_phones = SELECT p FROM user_node:u -(HAS_PHONE)- Phone:p;
+  phone_sharers = SELECT u2 FROM user_phones:p -(reverse_HAS_PHONE)- User:u2
+                  WHERE u2.uid != user_id
+                  ACCUM @@shared_phone_count += 1;
+
+  // Check transactions
+  sent = SELECT t FROM user_node:u -(SENT_TO:e)- User:t
+         ACCUM @@sent_to_count += 1, @@total_sent += e.amount;
+
+  received = SELECT u2 FROM start:u2 -(SENT_TO:e)- user_node:u
+             ACCUM @@received_from_count += 1, @@total_received += e.amount;
+
+  // Check connections to flagged users
+  hop1 = SELECT u2 FROM user_node:u -(SENT_TO)- User:u2
+         WHERE u2.is_flagged == true
+         ACCUM @@connected_flagged_users += u2.uid;
+
+  hop2 = SELECT u3 FROM user_devices:d -(reverse_USES_DEVICE)- User:u3
+         WHERE u3.is_flagged == true AND u3.uid != user_id
+         ACCUM @@connected_flagged_users += u3.uid;
+
+  PRINT @@user_name AS user_name;
+  PRINT @@is_flagged AS is_flagged;
+  PRINT @@shared_device_count AS shared_device_count;
+  PRINT @@shared_phone_count AS shared_phone_count;
+  PRINT @@sent_to_count AS sent_to_count;
+  PRINT @@received_from_count AS received_from_count;
+  PRINT @@total_sent AS total_sent;
+  PRINT @@total_received AS total_received;
+  PRINT @@connected_flagged_users AS connected_flagged_users;
+}
+
+INSTALL QUERY ALL
