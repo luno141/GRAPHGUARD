@@ -131,8 +131,5 @@ That makes the value of the graph database obvious in under 10 seconds.
 - `frontend/src/App.jsx`
 - `frontend/src/components/GraphView.jsx`
 
-## Demo Video
-If you are submitting this project to judges, add a short 60 to 90 second demo video link here before the final submission. The current repo is optimized for local evaluation and live demo flow.
-
 ## License
 MIT
